@@ -122,6 +122,49 @@ class TestPaymentManagerOperations:
 
     @patch("bedrock_agentcore.payments.client.boto3.client")
     @patch("bedrock_agentcore.payments.client.boto3.Session")
+    def test_create_payment_manager_stamps_created_by_tag(self, mock_session, mock_boto3_client):
+        """SDK stamps agentcore:created-by=agentcore-sdk when caller omits it."""
+        mock_session.return_value.region_name = "us-west-2"
+        mock_cp_client = MagicMock()
+        mock_boto3_client.return_value = mock_cp_client
+        mock_cp_client.create_payment_manager.return_value = {
+            "paymentManagerArn": "arn:aws:bedrock:us-west-2:123456789012:payment-manager/pm-123",
+            "paymentManagerId": "pm-123",
+            "status": "ACTIVE",
+        }
+
+        client = PaymentClient(region_name="us-west-2")
+        client.create_payment_manager(name="test-manager", role_arn=self.role_arn)
+
+        sent_tags = mock_cp_client.create_payment_manager.call_args[1]["tags"]
+        assert sent_tags["agentcore:created-by"] == "agentcore-sdk"
+
+    @patch("bedrock_agentcore.payments.client.boto3.client")
+    @patch("bedrock_agentcore.payments.client.boto3.Session")
+    def test_create_payment_manager_preserves_caller_created_by_tag(self, mock_session, mock_boto3_client):
+        """Caller-supplied agentcore:created-by is not overwritten; other tags are kept."""
+        mock_session.return_value.region_name = "us-west-2"
+        mock_cp_client = MagicMock()
+        mock_boto3_client.return_value = mock_cp_client
+        mock_cp_client.create_payment_manager.return_value = {
+            "paymentManagerArn": "arn:aws:bedrock:us-west-2:123456789012:payment-manager/pm-123",
+            "paymentManagerId": "pm-123",
+            "status": "ACTIVE",
+        }
+
+        client = PaymentClient(region_name="us-west-2")
+        client.create_payment_manager(
+            name="test-manager",
+            role_arn=self.role_arn,
+            tags={"agentcore:created-by": "my-app", "team": "payments"},
+        )
+
+        sent_tags = mock_cp_client.create_payment_manager.call_args[1]["tags"]
+        assert sent_tags["agentcore:created-by"] == "my-app"
+        assert sent_tags["team"] == "payments"
+
+    @patch("bedrock_agentcore.payments.client.boto3.client")
+    @patch("bedrock_agentcore.payments.client.boto3.Session")
     def test_get_payment_manager_success(self, mock_session, mock_boto3_client):
         """Test successful payment manager retrieval."""
         mock_session.return_value.region_name = "us-west-2"

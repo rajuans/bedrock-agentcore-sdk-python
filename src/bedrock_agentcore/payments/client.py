@@ -24,6 +24,11 @@ from .constants import PaymentConnectorProvisionMode, PaymentConnectorStatus
 
 logger = logging.getLogger(__name__)
 
+# Tag stamped on resources created through the SDK, used to attribute resources by origin.
+# Applied only when the caller has not already supplied this key.
+CREATED_BY_TAG_KEY = "agentcore:created-by"
+CREATED_BY_TAG_VALUE = "agentcore-sdk"
+
 
 class CoinbaseCdpConfigurationInput(TypedDict, total=False):
     """Configuration for Coinbase CDP credential provider.
@@ -250,20 +255,21 @@ class PaymentClient:
     def __init__(
         self,
         region_name: Optional[str] = None,
-        integration_source: Optional[str] = None,
+        integration_source: str = "raw-sdk",
     ) -> None:
         """Initialize the Payments control plane client.
 
         Args:
             region_name: AWS region name. Defaults to boto3 session region or us-west-2
-            integration_source: Optional identifier for tracking integration source in telemetry
+            integration_source: Identifier of the surface making the calls, propagated via
+                the boto3 User-Agent header for usage measurement. Defaults to "raw-sdk".
 
         """
         self.region_name = region_name or boto3.Session().region_name or "us-west-2"
-        self.integration_source = integration_source
+        self.integration_source = integration_source or "raw-sdk"
 
         # Build config with user-agent for telemetry
-        user_agent_extra = build_user_agent_suffix(integration_source)
+        user_agent_extra = build_user_agent_suffix(integration_source=self.integration_source, feature="payments")
         client_config = Config(user_agent_extra=user_agent_extra)
 
         # Control plane operations are available through bedrock-agentcore-control service
@@ -391,6 +397,7 @@ class PaymentClient:
         wait_for_ready: bool = False,
         max_wait: int = 300,
         poll_interval: int = 10,
+        tags: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """Create a payment manager resource.
 
@@ -404,6 +411,8 @@ class PaymentClient:
             wait_for_ready: Whether to wait for manager to reach READY status
             max_wait: Maximum seconds to wait if wait_for_ready is True
             poll_interval: Seconds between checks if wait_for_ready is True
+            tags: Optional resource tags. The SDK stamps ``agentcore:created-by=agentcore-sdk``
+                for origin attribution unless the caller already provides that key.
 
         Returns:
             Dictionary with paymentManagerArn, paymentManagerId, and status
@@ -429,6 +438,10 @@ class PaymentClient:
 
             if authorizer_configuration:
                 params["authorizerConfiguration"] = authorizer_configuration
+
+            resource_tags = dict(tags) if tags else {}
+            resource_tags.setdefault(CREATED_BY_TAG_KEY, CREATED_BY_TAG_VALUE)
+            params["tags"] = resource_tags
 
             response = self.payments_cp_client.create_payment_manager(**params)
 
